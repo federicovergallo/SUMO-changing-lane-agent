@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on sab 13 giu 2020 12:12:22 CEST by Eclipse SUMO netedit Version v1_6_0+0400-c5b49db20f
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
+
+    <input>
+        <sumo-net-file value="/home/fede/selfdriving/sumo/netedit_networks/highway/highway.net.xml"/>
+    </input>
+
+    <output>
+        <output-file value="/home/fede/selfdriving/sumo/netedit_networks/highway/highway.net.xml"/>
+    </output>
+
+    <processing>
+        <geometry.min-radius.fix.railways value="false"/>
+        <geometry.max-grade.fix value="false"/>
+        <offset.disable-normalization value="true"/>
+        <lefthand value="false"/>
+    </processing>
+
+    <junctions>
+        <no-turnarounds value="true"/>
+        <junctions.corner-detail value="5"/>
+        <junctions.limit-turn-speed value="5.5"/>
+        <rectangular-lane-cut value="false"/>
+    </junctions>
+
+    <pedestrian>
+        <walkingareas value="false"/>
+    </pedestrian>
+
+    <netedit>
+        <route-files value="/home/fede/selfdriving/sumo/netedit_networks/highway/highway.rou.xml"/>
+    </netedit>
+
+    <report>
+        <aggregate-warnings value="5"/>
+    </report>
+
+</configuration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <route edges="gneE6 gneE7 gneE8 gneE9" color="yellow" id="route_0"/>
+
+    <vType id="human" accel="0.8" decel="4.5" sigma="0.5" length="5" maxSpeed="70" minGap="0" laneChangeModel="SL2015" guiShape='passenger/wagon'/>
+    <vType id="rl" accel="0.8" decel="4.5" sigma="0.5" length="5" maxSpeed="50"  carFollowModel="IDM" 
+minGap="2" laneChangeModel="SL2015"  guiShape='passenger/van' color="1,0,0"/>
+
+
+	
+</routes>
