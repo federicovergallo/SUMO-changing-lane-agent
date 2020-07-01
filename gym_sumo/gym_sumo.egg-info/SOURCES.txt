@@ -1,0 +1,7 @@
+README.md
+setup.py
+gym_sumo.egg-info/PKG-INFO
+gym_sumo.egg-info/SOURCES.txt
+gym_sumo.egg-info/dependency_links.txt
+gym_sumo.egg-info/requires.txt
+gym_sumo.egg-info/top_level.txt
