@@ -29,7 +29,7 @@ def CarModel(num_actions, input_len):
     return model
 
 class A2CAgent:
-  def __init__(self, fn=None, lr=0.0005, gamma=0.95, value_c=0.5, entropy_c=1e-4):
+  def __init__(self, fn=None, lr=0.01, gamma=0.95, value_c=0.5, entropy_c=1e-4):
     # Coefficients are used for the loss terms.
     self.value_c = value_c
     self.entropy_c = entropy_c
