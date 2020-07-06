@@ -16,12 +16,41 @@ def CarModel(num_actions, input_len):
     hidden1 = kl.Dense(128, activation='relu')(input)
     hidden2 = kl.Dense(256, activation='relu')(hidden1)
     hidden3 = kl.Dense(128, activation='relu')(hidden2)
-    value = kl.Dense(1, name='value')(hidden3)
-    # Logits are unnormalized log probabilities.
-    logits = kl.Dense(num_actions, activation='softmax', name='policy_logits')(hidden3)
+    state_value = kl.Dense(1)(hidden3)
+    state_value = kl.Lambda(lambda s: tf.keras.backend.expand_dims(s[:, 0], -1), output_shape=(num_actions,))(state_value)
 
-    model = tf.keras.models.Model(input, [logits, value], name='CarModel')
+    action_advantage = kl.Dense(num_actions)(hidden3)
+    action_advantage = kl.Lambda(lambda a: a[:, :] - tf.keras.backend.mean(a[:, :], keepdims=True), output_shape=(num_actions,))(
+        action_advantage)
+
+    X = kl.Add()([state_value, action_advantage])
+
+    model = tf.keras.models.Model(input, X, name='CarModel')
     return model
+
+class DQModel(tf.keras.Model):
+    def __init__(self, hidden_size=128, num_actions=3):
+        super(DQModel, self).__init__()
+        self.dense1 = kl.Dense(hidden_size, activation='relu')
+        self.dense2 = kl.Dense(hidden_size, activation='relu')
+        self.adv_dense = kl.Dense(hidden_size, activation='relu')
+        self.adv_out = kl.Dense(num_actions)
+        self.v_dense = kl.Dense(hidden_size, activation='relu')
+        self.v_out = kl.Dense(1)
+        self.lambda_layer = kl.Lambda(lambda x: x - tf.reduce_mean(x))
+        self.combine = kl.Add()
+
+    def call(self, input):
+        x = self.dense1(input)
+        x = self.dense2(x)
+        adv = self.adv_dense(x)
+        adv = self.adv_out(adv)
+        v = self.v_dense(x)
+        v = self.v_out(v)
+        norm_adv = self.lambda_layer(adv)
+        combined = self.combine([v, norm_adv])
+        return combined
+
 
 class DQNAgent:
     def __init__(self, fn=None, lr=0.01, gamma=0.95, batch_size=32):
@@ -43,9 +72,12 @@ class DQNAgent:
         self.EPS_DECAY = 100
         self.steps_done = 0
         self.batch_size = batch_size
+        self.TAU = 0.08
         # Parameter updates
         self.loss = tf.keras.losses.Huber()
         self.optimizer = tf.optimizers.Adam(learning_rate=self.lr)
+        self.main_network = CarModel(num_actions=3, input_len=37)
+        self.target_network = CarModel(num_actions=3, input_len=37)
 
     def create_log_dir(self):
         if not os.path.exists(self.log_dir):
@@ -57,7 +89,6 @@ class DQNAgent:
         if not os.path.exists(self.model_dir):
             os.mkdir(self.model_dir)
 
-    @tf.function
     def act(self, state, main_network):
         # we need to do exploration vs exploitation
         eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
@@ -66,51 +97,28 @@ class DQNAgent:
         if np.random.rand() < eps_threshold:
             action = random.randint(0, 2)
         else:
-            action, value = main_network.predict(np.expand_dims(state, axis=0))
+            action = main_network.predict(np.expand_dims(state, axis=0))
             action = np.argmax(action)
         return action
 
-    @tf.function
-    def huberLoss(self, a, b):
-        error = a - b
-        result = tf.cond(tf.reduce_mean(tf.math.abs(error)) > 1.0, lambda: tf.math.abs(error) - 0.5,
-                         lambda: error * error / 2)
-        return result
-
-    @tf.function
-    def train_step(self, replay_memory, main_dqn, target_dqn):
-        """
-        Args:
-            replay_memory: A ReplayMemory object
-            main_dqn: A DQN object
-            target_dqn: A DQN object
-            batch_size: Integer, Batch size
-            gamma: Float, discount factor for the Bellman equation
-        Returns:
-            loss: The loss of the minibatch, for tensorboard
-        Draws a minibatch from the replay memory, calculates the
-        target Q-value that the prediction Q-value is regressed to.
-        Then a parameter update is performed on the main DQN.
-        """
-        # The main network estimates which action is best (in the next
-        # state s', new_states is passed!)
+    def train_step_(self, replay_memory):
+        states, actions, rewards, new_states, terminal_flags = replay_memory.get_minibatch()
+        q_vals = self.main_network(new_states)
+        actions = np.argmax(q_vals, axis=1)
+        # The target network estimates the Q-values (in the next state s', new_states is passed!)
         # for every transition in the minibatch
-        with tf.GradientTape(persistent=True) as tape:
-            # Draw a minibatch from the replay memory
-            states, actions, rewards, new_states, terminal_flags = replay_memory.get_minibatch()
-            tape.watch(main_dqn.trainable_variables)
-            [actions, _] = main_dqn(new_states)
-            # The target network estimates the Q-values (in the next state s', new_states is passed!)
-            # for every transition in the minibatch
-            [_, q_vals] = target_dqn(new_states)
-            # Bellman equation. Multiplication with (1-terminal_flags) makes sure that
-            # if the game is over, targetQ=rewards
-            target_q = rewards + (self.gamma * q_vals * (1 - terminal_flags))
-            # Gradient descend step to update the parameters of the main network
-            loss = self.huberLoss(target_q, q_vals)
-        grads = tape.gradient(loss, main_dqn.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, main_dqn.trainable_weights))
+        q_vals = self.target_network(new_states)
+        # Bellman equation. Multiplication with (1-terminal_flags) makes sure that
+        # if the game is over, targetQ=rewards
+        q_vals = np.array([q_vals[num, action] for num, action in enumerate(actions)])
+        target_q = rewards + (self.gamma * q_vals * (1 - terminal_flags))
+        loss = self.main_network.train_on_batch(states, target_q)
         return loss
+
+    def update_network(self):
+        # update target network parameters slowly from primary network
+        for t, e in zip(self.main_network.trainable_variables, self.target_network.trainable_variables):
+            t.assign(t * (1 - self.TAU) + e * self.TAU)
 
     def train(self, env, steps_per_epoch=128, epochs=10000):
         # Every four actions a gradient descend step is performed
@@ -120,10 +128,7 @@ class DQNAgent:
         # Replay mem
         REPLAY_MEMORY_START_SIZE = 33
         # Create network model
-        main_network = CarModel(num_actions=3, input_len=env.state_dim)
-        target_network = CarModel(num_actions=3, input_len=env.state_dim)
-        # Copy main net weights to target
-        target_network.set_weights(main_network.get_weights())
+        self.main_network.compile(optimizer=tf.keras.optimizers.Adam(), loss='mse')
         # Replay memory
         my_replay_memory = ReplayMemory()
         # Metrics
@@ -136,7 +141,7 @@ class DQNAgent:
         train_speed_rate = tf.keras.metrics.Mean()
 
         # Training loop: collect samples, send to optimizer, repeat updates times.
-        next_obs = env.reset(gui=False, numVehicles=35)
+        next_obs = env.reset(gui=True, numVehicles=22)
         first_epoch = 0
         try:
             for epoch in range(first_epoch, epochs):
@@ -145,7 +150,7 @@ class DQNAgent:
                     # curr state
                     state = next_obs.copy()
                     # get action
-                    action = self.act(state, main_network)
+                    action = self.act(state, self.main_network)
                     # do step
                     next_obs, rewards_info, done, collision = env.step(action)
                     # process obs and get rewards
@@ -165,12 +170,15 @@ class DQNAgent:
                     train_speed_rate.update_state(avg_speed_perc)
 
                     # Train every UPDATE_FREQ times
-                    if step % UPDATE_FREQ == 0 and self.steps_done > REPLAY_MEMORY_START_SIZE:
-                        loss_value = self.train_step(my_replay_memory, main_network, target_network)
+                    if self.steps_done > REPLAY_MEMORY_START_SIZE:
+                        loss_value = self.train_step_(my_replay_memory)
                         loss_avg.update_state(loss_value)
+                        self.update_network()
+                    else:
+                        loss_avg.update_state(-1)
                     # Copy network from main to target every NETW_UPDATE_FREQ
                     if step % NETW_UPDATE_FREQ == 0 and step > REPLAY_MEMORY_START_SIZE:
-                        target_network.set_weights(main_network.get_weights())
+                        self.target_network.set_weights(self.main_network.get_weights())
 
                     self.steps_done += 1
 
@@ -194,12 +202,12 @@ class DQNAgent:
 
                 # Save model
                 if epoch % 1000 == 0:
-                    tf.keras.models.save_model(main_network, self.model_dir + "/main_network.hp5", save_format="h5")
-                    tf.keras.models.save_model(target_network, self.model_dir + "/target_network.hp5", save_format="h5")
+                    tf.keras.models.save_model(self.main_network, self.model_dir + "/" + str(epoch) + "_main_network.hp5", save_format="h5")
+                    tf.keras.models.save_model(self.target_network, self.model_dir + "/" + str(epoch) + "_target_network.hp5", save_format="h5")
         except KeyboardInterrupt:
             # self.model.save_weights(self.model_dir+"/model.ckpt")
-            tf.keras.models.save_model(main_network, self.model_dir + "/main_network.hp5", save_format="h5")
-            tf.keras.models.save_model(target_network, self.model_dir + "/target_network.hp5", save_format="h5")
+            tf.keras.models.save_model(self.main_network, self.model_dir + "/" + str(epoch) + "_main_network.hp5", save_format="h5")
+            tf.keras.models.save_model(self.target_network, self.model_dir + "/" + str(epoch) + "_target_network.hp5", save_format="h5")
 
         env.close()
 

@@ -180,7 +180,6 @@ class SumoEnv(gym.Env):
 		collisions = traci.simulation.getCollidingVehiclesIDList()
 		if self.name in collisions:
 			self.collision = True
-			self.done = True
 			return True
 		self.collision = False
 		return False
@@ -260,7 +259,7 @@ class SumoEnv(gym.Env):
 		if collision:
 			R_safe = -100
 		else:
-			R_safe = 0
+			R_safe = +1
 		
 		# total reward
 		R_tot = R_comf + R_eff + R_safe
@@ -311,7 +310,8 @@ class SumoEnv(gym.Env):
 			done = False
 		'''
 		# Return
-		return next_state, reward, self.done, collision
+		done = collision
+		return next_state, reward, done, collision
 		
 	def render(self, mode='human', close=False):
 		pass
