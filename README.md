@@ -4,3 +4,10 @@ The project aims at developing a reinforcement learning application to make an a
 
 
 ![Alt text](figures/traffic.png?raw=true "Traffic scenario. Red vehicle is the agent")
+
+
+## Installation
+First install SUMO and then the required packages from requirements.txt
+
+## More Details 
+I wrote a report about this. You can find it inside report folder
