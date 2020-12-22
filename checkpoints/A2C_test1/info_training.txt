@@ -1,0 +1,8 @@
+num_vehicles=25
+lr=0.001
+layer1=64
+layer2=128
+layer3=64
+Decreased eff, comf alphas:
+from alpha_comf = 0.005, w_eff = 0.0005
+to alpha_comf = 0.05, w_eff = 0.005

@@ -1,0 +1,7 @@
+num_vehicles=25
+lr=0.01
+layer1=64
+layer2=128
+layer3=64
+
+increased learning rate x10

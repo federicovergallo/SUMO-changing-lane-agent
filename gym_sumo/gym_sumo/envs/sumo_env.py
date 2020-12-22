@@ -223,7 +223,7 @@ class SumoEnv(gym.Env):
 			return np.array([dist, long_speed, acc, lat_pos])
 		
 		
-	def compute_reward(self, collision):
+	def compute_reward(self, collision, action):
 		'''
 			Reward function is made of three elements:
 			 - Comfort 
@@ -232,9 +232,11 @@ class SumoEnv(gym.Env):
 			 Taken from Ye et al.
 		'''
 		# Rewards Parameters
-		alpha_comf = 0.5
+		alpha_comf = 0.005
 		w_lane = 2.5
 		w_speed = 2.5
+		w_change = 2.0
+		w_eff = 0.0005
 		
 		# Comfort reward 
 		jerk = self.compute_jerk()
@@ -251,8 +253,13 @@ class SumoEnv(gym.Env):
 		R_lane = -(np.abs(self.pos[0] - desired_x) + np.abs(self.pos[1] - desired_y))
 		# Speed
 		R_speed = -np.abs(self.speed - self.target_speed)
+		# Penalty for changing lane
+		if action:
+			R_change = -1
+		else:
+			R_change = 1
 		# Eff
-		R_eff = w_lane*R_lane + w_speed*R_speed
+		R_eff = w_eff*(w_lane*R_lane + w_speed*R_speed + w_change*R_change)
 		
 		# Safety Reward
 		# Just penalize collision for now
@@ -295,7 +302,7 @@ class SumoEnv(gym.Env):
 		# Check collision
 		collision = self.detect_collision()
 		# Compute Reward 
-		reward = self.compute_reward(collision)
+		reward = self.compute_reward(collision, action)
 		# Update agent params 
 		self.update_params()
 		# State 

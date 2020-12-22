@@ -53,7 +53,7 @@ class DQModel(tf.keras.Model):
 
 
 class DQNAgent:
-    def __init__(self, fn=None, lr=0.01, gamma=0.95, batch_size=32):
+    def __init__(self, fn=None, lr=0.001, gamma=0.95, batch_size=32):
         # Coefficients are used for the loss terms.
         self.gamma = gamma
         self.lr = lr
@@ -141,7 +141,7 @@ class DQNAgent:
         train_speed_rate = tf.keras.metrics.Mean()
 
         # Training loop: collect samples, send to optimizer, repeat updates times.
-        next_obs = env.reset(gui=True, numVehicles=22)
+        next_obs = env.reset(gui=True, numVehicles=40)
         first_epoch = 0
         try:
             for epoch in range(first_epoch, epochs):

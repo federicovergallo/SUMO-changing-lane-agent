@@ -18,9 +18,9 @@ def ProbabilityDistribution():
 
 def CarModel(num_actions, input_len):
     input = kl.Input(shape=(input_len))
-    hidden1 = kl.Dense(128, activation='relu')(input)
-    hidden2 = kl.Dense(256, activation='relu')(hidden1)
-    hidden3 = kl.Dense(128, activation='relu')(hidden2)
+    hidden1 = kl.Dense(64, activation='relu')(input)
+    hidden2 = kl.Dense(128, activation='relu')(hidden1)
+    hidden3 = kl.Dense(64, activation='relu')(hidden2)
     value = kl.Dense(1, name='value')(hidden3)
     # Logits are unnormalized log probabilities.
     logits = kl.Dense(num_actions, activation='softmax', name='policy_logits')(hidden3)
@@ -29,7 +29,7 @@ def CarModel(num_actions, input_len):
     return model
 
 class A2CAgent:
-  def __init__(self, fn=None, lr=0.01, gamma=0.95, value_c=0.5, entropy_c=1e-4):
+  def __init__(self, lr=0.01, gamma=0.95, value_c=0.5, entropy_c=1e-4):
     # Coefficients are used for the loss terms.
     self.value_c = value_c
     self.entropy_c = entropy_c
@@ -37,22 +37,31 @@ class A2CAgent:
     self.lr = lr
     self.current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     self.checkpoint_dir = 'checkpoints/'
-    self.model_dir = self.checkpoint_dir + self.current_time
+    self.model_name = 'A2C'
+    self.model_dir = self.checkpoint_dir + self.model_name
     self.log_dir = 'logs/'
-    self.train_log_dir = self.log_dir + self.current_time
+    self.train_log_dir = self.log_dir + self.model_name
     self.create_log_dir()
     self.train_summary_writer = tf.summary.create_file_writer(self.train_log_dir)
-    self.fn = fn
 
-  def test(self, env, render=True):
-    obs, done, ep_reward = env.reset(), False, 0
-    while not done:
-      action, _ = self.action_value(self.model, obs[None, :])
-      obs, reward, done = env.step(action)
-      ep_reward += reward
-      if render:
-        env.render()
-    return ep_reward
+  def test(self, env, steps_per_epoch=128):
+    # Create network model
+    self.dist = ProbabilityDistribution()
+    self.model = CarModel(num_actions=3, input_len=env.state_dim)
+    last_models = os.listdir(self.model_dir)
+    if last_models:
+      last_model_path = self.model_dir + '/' + last_models[-1]
+      self.model = tf.keras.models.load_model(last_model_path, custom_objects={'_logits_loss': self._logits_loss,
+                                                                               '_value_loss': self._value_loss,
+                                                                               'action_value': self.action_value})
+    else:
+      self.model.compile(optimizer=ko.Adam(lr=self.lr), loss=[self._logits_loss, self._value_loss])
+      next_obs = env.reset(gui=True, numVehicles=35)
+    while True:
+        for step in range(steps_per_epoch):
+            action, values = self.action_value(self.model, next_obs[None, :])
+            next_obs, rewards_info, done, collision = env.step(action)
+    return 0
 
   def create_log_dir(self):
       if not os.path.exists(self.log_dir):
@@ -64,29 +73,38 @@ class A2CAgent:
       if not os.path.exists(self.model_dir):
           os.mkdir(self.model_dir)
 
-  def train(self, env, steps_per_epoch=64, epochs=50000):
+  def train(self, env, steps_per_epoch=128, epochs=50000+1):
       # Create network model
       self.dist = ProbabilityDistribution()
       self.model = CarModel(num_actions=3, input_len=env.state_dim)
-      if self.fn is not None:
-          # self.model.load_weights(fn)
-          self.model = tf.keras.models.load_model(self.fn, custom_objects={'_logits_loss': self._logits_loss,
-                                                                      '_value_loss': self._value_loss,
-                                                                      'action_value': self.action_value})
-      self.model.compile(
-          optimizer=ko.Adam(lr=self.lr),
-          # Define separate losses for policy logits and value estimate.
-          loss=[self._logits_loss, self._value_loss])
-
+      last_models = os.listdir(self.model_dir)
+      if last_models:
+          last_model_path = self.model_dir + '/' + last_models[-1]
+          first_epoch = int(last_models[-1].split("_")[0]) + 1
+          self.model = tf.keras.models.load_model(last_model_path, custom_objects={'_logits_loss': self._logits_loss,
+                                                                  '_value_loss': self._value_loss,
+                                                                  'action_value': self.action_value})
+      else:
+          self.model.compile(optimizer=ko.Adam(lr=self.lr), loss=[self._logits_loss, self._value_loss])
+          first_epoch = 0
       # Storage helpers for a single batch of data.
       actions = np.empty((steps_per_epoch,), dtype=np.int32)
+      # Metrics
+      loss_avg = tf.keras.metrics.Mean()
+      train_reward_tot = tf.keras.metrics.Sum()
+      train_rew_comf_tot = tf.keras.metrics.Sum()
+      train_rew_eff_tot = tf.keras.metrics.Sum()
+      train_rew_safe_tot = tf.keras.metrics.Sum()
+
+      train_coll_rate = tf.keras.metrics.Mean()
+      train_speed_rate = tf.keras.metrics.Mean()
       rewards_tot, R_comf, R_eff, R_safe, dones, values, collisions, avg_speed_perc = np.empty((8, steps_per_epoch))
       observations = np.empty((steps_per_epoch,env.state_dim))
 
       # Training loop: collect samples, send to optimizer, repeat updates times.
       ep_rewards = [0.0]
-      next_obs = env.reset(gui=True, numVehicles=35)
-      first_epoch = 0
+      next_obs = env.reset(gui=True, numVehicles=25)
+
       try:
           for epoch in range(first_epoch, epochs):
               for step in range(steps_per_epoch):
@@ -98,6 +116,14 @@ class A2CAgent:
                   collisions[step] = collision
                   ep_rewards[-1] += rewards_tot[step]
 
+                  # Update metrics
+                  train_reward_tot.update_state(rewards_tot[step])
+                  train_rew_comf_tot.update_state(R_comf[step])
+                  train_rew_eff_tot.update_state(R_eff[step])
+                  train_rew_safe_tot.update_state(R_safe[step])
+                  train_coll_rate.update_state(collisions[step])
+                  train_speed_rate.update_state(avg_speed_perc[step])
+
               _, next_value = self.action_value(self.model, next_obs[None, :])
 
               returns, advs = self._returns_advantages(rewards_tot, dones, values, next_value)
@@ -107,24 +133,34 @@ class A2CAgent:
               # Performs a full training step on the collected batch.
               # Note: no need to mess around with gradients, Keras API handles it.
               losses = self.model.train_on_batch(observations, [acts_and_advs, returns])
+              loss_avg.update_state(losses)
 
               logging.info("[%d/%d] Losses: %s" % (epoch + 1, epochs, losses))
 
+              # Write
               with self.train_summary_writer.as_default():
-                  tf.summary.scalar('loss', np.mean(losses), step=epoch)
-                  tf.summary.scalar('reward_tot', np.mean(rewards_tot), step=epoch)
-                  tf.summary.scalar('rewards_comf', np.sum(R_comf), step=epoch)
-                  tf.summary.scalar('rewards_eff', np.sum(R_eff), step=epoch)
-                  tf.summary.scalar('rewards_safe', np.sum(R_safe), step=epoch)
-                  tf.summary.scalar('collission_rate', np.mean(collisions), step=epoch)
-                  tf.summary.scalar('avg speed wrt maximum', np.mean(avg_speed_perc), step=epoch)
+                  tf.summary.scalar('loss', loss_avg.result(), step=epoch)
+                  tf.summary.scalar('reward_tot', train_reward_tot.result(), step=epoch)
+                  tf.summary.scalar('rewards_comf', train_rew_comf_tot.result(), step=epoch)
+                  tf.summary.scalar('rewards_eff', train_rew_eff_tot.result(), step=epoch)
+                  tf.summary.scalar('rewards_safe', train_rew_safe_tot.result(), step=epoch)
+                  tf.summary.scalar('collission_rate', train_coll_rate.result(), step=epoch)
+                  tf.summary.scalar('avg speed wrt maximum', train_speed_rate.result(), step=epoch)
+
+              # Reset
+              train_reward_tot.reset_states()
+              train_rew_comf_tot.reset_states()
+              train_rew_eff_tot.reset_states()
+              train_rew_safe_tot.reset_states()
+              train_coll_rate.reset_states()
+              train_speed_rate.reset_states()
+              loss_avg.reset_states()
 
               if epoch % 100 == 0:
-                  tf.keras.models.save_model(self.model, self.model_dir+"/model.hp5", save_format="h5")
+                  tf.keras.models.save_model(self.model, self.model_dir + "/" + str(epoch) + "_model.hp5", save_format="h5")
 
       except KeyboardInterrupt:
-          #self.model.save_weights(self.model_dir+"/model.ckpt")
-          tf.keras.models.save_model(self.model, self.model_dir + "/model.hp5", save_format="h5")
+          tf.keras.models.save_model(self.model, self.model_dir + "/" + str(epoch) + "_model.hp5", save_format="h5")
 
       env.close()
 
