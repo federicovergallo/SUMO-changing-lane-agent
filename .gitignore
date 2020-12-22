@@ -1,0 +1,6 @@
+__pycache__
+checkpoints/*
+gym_sumo/gym_sumo.egg-info
+logs/*
+Untitled.ipynb
+car_model_bckp.py
