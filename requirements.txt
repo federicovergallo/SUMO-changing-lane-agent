@@ -2,6 +2,6 @@ sumotools==0.3.1
 gym==0.17.2
 scipy==1.4.1
 numpy==1.13.3
-tensorflow==2.4.0
+tensorflow==2.5.0
 sumolib==1.8.0
 traci==1.8.0
